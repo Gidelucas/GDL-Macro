@@ -1,11 +1,13 @@
 $ErrorActionPreference = "Stop"
 
-$destino = "C:\GDL-Macro"
+$destino = Join-Path $env:TEMP "GDL-Macro"
 $baseUrl = "https://raw.githubusercontent.com/Gidelucas/GDL-Macro/main"
 
-if (!(Test-Path $destino)) {
-    New-Item -ItemType Directory -Path $destino -Force | Out-Null
+if (Test-Path $destino) {
+    Remove-Item $destino -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+New-Item -ItemType Directory -Path $destino -Force | Out-Null
 
 $arquivos = @(
     "GDL_Macro.ahk",
