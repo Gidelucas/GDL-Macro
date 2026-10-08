@@ -1,6 +1,13 @@
-﻿
+
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+
+global GDLTimers := Map()
+global GDLTimerGui := 0
+global GDLTimerText := 0
+global GDLAlarmGui := 0
+global GDLAlarmText := 0
+global GDLAlarmEndTick := 0
 
 global IniFile := A_ScriptDir "\snippets.ini"
 global Snippets := Map()
@@ -28,6 +35,13 @@ RegisterBuiltInActions()
 RegisterHelpCommands()
 RegisterTextTransformCommands()
 StartLiveSuggestionWatcher()
+RegisterGDLTimers()
+RegisterGDLClockAlarms()
+Hotstring(":?Z:;cancela", CancelGDLTimers)
+Hotstring(":?Z:;sair", ExitAndCleanupGDL)
+CreateGDLTimerDisplay()
+CreateGDLAlarmDisplay()
+SetTimer(UpdateGDLTimerDisplay, 250)
 
 ^!t::ShowManager()
 
@@ -332,6 +346,8 @@ UpdateLiveSuggestionTooltip()
         }
 
         specialTextCommands := Map(
+            "cancela", "Cancelar temporizadores e alarmes",
+
             "mai", "Texto copiado em MAIÚSCULAS",
             "min", "Texto copiado em minúsculas",
             "primai", "Iniciais Das Palavras Em Maiúsculas"
@@ -2434,4 +2450,320 @@ DeleteSelected(*)
 ReloadScript(*)
 {
     Reload
+}
+
+
+
+RegisterGDLTimers()
+{
+    Loop 3600
+    {
+        n := A_Index
+        Hotstring(":?Z:;" . n . "s", CreateGDLTimer.Bind(n, "s"))
+    }
+
+    Loop 1440
+    {
+        n := A_Index
+        Hotstring(":?Z:;" . n . "min", CreateGDLTimer.Bind(n, "min"))
+    }
+
+    Loop 72
+    {
+        n := A_Index
+        Hotstring(":?Z:;" . n . "h", CreateGDLTimer.Bind(n, "h"))
+    }
+}
+
+RegisterGDLClockAlarms()
+{
+    Loop 24
+    {
+        hour := A_Index - 1
+
+        Loop 60
+        {
+            minute := A_Index - 1
+            command := Format("{:02}:{:02}", hour, minute)
+
+            Hotstring(
+                ":?Z:;" . command,
+                CreateGDLClockAlarm.Bind(hour, minute, command)
+            )
+        }
+    }
+}
+
+CreateGDLTimer(value, unit, *)
+{
+    if unit = "s"
+    {
+        totalSeconds := value
+        description := value . "s"
+    }
+    else if unit = "min"
+    {
+        totalSeconds := value * 60
+        description := value . "min"
+    }
+    else
+    {
+        totalSeconds := value * 3600
+        description := value . "h"
+    }
+
+    AddGDLTimer(totalSeconds, description)
+    ShowGDLTimerConfirmation("Temporizador criado: " . description)
+}
+
+CreateGDLClockAlarm(hour, minute, command, *)
+{
+    nowHour := Integer(FormatTime(A_Now, "HH"))
+    nowMinute := Integer(FormatTime(A_Now, "mm"))
+    nowSecond := Integer(FormatTime(A_Now, "ss"))
+
+    nowSeconds := (nowHour * 3600) + (nowMinute * 60) + nowSecond
+    targetSeconds := (hour * 3600) + (minute * 60)
+
+    diffSeconds := targetSeconds - nowSeconds
+
+    if diffSeconds <= 0
+        diffSeconds += 86400
+
+    if diffSeconds > 43200
+    {
+        ShowGDLTimerConfirmation("Horário fora das próximas 12 horas: " . command)
+        return
+    }
+
+    AddGDLTimer(diffSeconds, command)
+    ShowGDLTimerConfirmation("Alarme marcado para " . command)
+}
+
+AddGDLTimer(totalSeconds, description)
+{
+    global GDLTimers
+
+    id := A_TickCount . "_" . GDLTimers.Count . "_" . description
+    endTick := A_TickCount + (totalSeconds * 1000)
+
+    callback := GDLTimerFinished.Bind(id)
+
+    GDLTimers[id] := {
+        EndTick: endTick,
+        Description: description,
+        Callback: callback
+    }
+
+    SetTimer(callback, -(totalSeconds * 1000))
+    UpdateGDLTimerDisplay()
+}
+
+GDLTimerFinished(id, *)
+{
+    global GDLTimers
+
+    if !GDLTimers.Has(id)
+        return
+
+    description := GDLTimers[id].Description
+    GDLTimers.Delete(id)
+
+    UpdateGDLTimerDisplay()
+    StartGDLAlarm(description)
+}
+
+CancelGDLTimers(*)
+{
+    global GDLTimers
+
+    for id, timer in GDLTimers
+    {
+        try SetTimer(timer.Callback, 0)
+    }
+
+    GDLTimers.Clear()
+    StopGDLAlarm()
+
+    ShowGDLTimerConfirmation("Temporizadores e alarmes cancelados")
+    UpdateGDLTimerDisplay()
+}
+
+
+ExitAndCleanupGDL(*)
+{
+    expectedDir := A_Temp . "\GDL-Macro"
+    currentDir := A_ScriptDir
+
+    if StrLower(currentDir) = StrLower(expectedDir)
+    {
+        cleanupCmd := 'ping 127.0.0.1 -n 3 >nul & rmdir /s /q "' . currentDir . '"'
+
+        try Run(
+            A_ComSpec . ' /d /c "' . cleanupCmd . '"',
+            A_Temp,
+            "Hide"
+        )
+    }
+
+    ExitApp()
+}
+
+CreateGDLTimerDisplay()
+{
+    global GDLTimerGui, GDLTimerText
+
+    GDLTimerGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20")
+    GDLTimerGui.BackColor := "202020"
+    GDLTimerGui.MarginX := 8
+    GDLTimerGui.MarginY := 4
+
+    GDLTimerText := GDLTimerGui.AddText(
+        "cFFFFFF w175 Right",
+        ""
+    )
+}
+
+CreateGDLAlarmDisplay()
+{
+    global GDLAlarmGui, GDLAlarmText
+
+    GDLAlarmGui := Gui("+AlwaysOnTop -Caption +ToolWindow +E0x20")
+    GDLAlarmGui.BackColor := "202020"
+    GDLAlarmGui.MarginX := 10
+    GDLAlarmGui.MarginY := 6
+
+    GDLAlarmText := GDLAlarmGui.AddText(
+        "cFFFFFF w230 Right",
+        ""
+    )
+}
+
+PositionGDLBottomRight(guiObj, marginRight := 12, marginBottom := 8)
+{
+    MonitorGetWorkArea(1, &left, &top, &right, &bottom)
+
+    guiObj.GetPos(&x, &y, &w, &h)
+
+    x := right - w - marginRight
+    y := bottom - h - marginBottom
+
+    guiObj.Move(x, y)
+}
+
+UpdateGDLTimerDisplay()
+{
+    global GDLTimers, GDLTimerGui, GDLTimerText, GDLAlarmEndTick
+
+    if !IsObject(GDLTimerGui)
+        return
+
+    if GDLAlarmEndTick > A_TickCount
+    {
+        GDLTimerGui.Hide()
+        return
+    }
+
+    if GDLTimers.Count = 0
+    {
+        GDLTimerGui.Hide()
+        return
+    }
+
+    lines := []
+    nowTick := A_TickCount
+
+    for id, timer in GDLTimers
+    {
+        remainingMs := timer.EndTick - nowTick
+
+        if remainingMs < 0
+            remainingMs := 0
+
+        remainingSeconds := Ceil(remainingMs / 1000)
+
+        hours := Floor(remainingSeconds / 3600)
+        minutes := Floor(Mod(remainingSeconds, 3600) / 60)
+        seconds := Mod(remainingSeconds, 60)
+
+        if hours > 0
+            timeText := Format("{:02}:{:02}:{:02}", hours, minutes, seconds)
+        else
+            timeText := Format("{:02}:{:02}", minutes, seconds)
+
+        lines.Push(timer.Description . "  " . timeText)
+    }
+
+    display := ""
+
+    for index, line in lines
+    {
+        if index > 1
+            display .= "`n"
+
+        display .= line
+    }
+
+    GDLTimerText.Text := display
+    GDLTimerGui.Show("NoActivate AutoSize")
+    PositionGDLBottomRight(GDLTimerGui)
+}
+
+StartGDLAlarm(description)
+{
+    global GDLAlarmGui, GDLAlarmText, GDLAlarmEndTick
+
+    GDLAlarmText.Text := "Alarme: " . description
+    GDLAlarmEndTick := A_TickCount + 5000
+
+    GDLAlarmGui.Show("NoActivate AutoSize")
+    PositionGDLBottomRight(GDLAlarmGui)
+
+    PlayGDLAlarmSound()
+    SetTimer(PlayGDLAlarmSound, 2200)
+    SetTimer(StopGDLAlarm, -5000)
+}
+
+PlayGDLAlarmSound()
+{
+    global GDLAlarmEndTick
+
+    if A_TickCount >= GDLAlarmEndTick
+    {
+        SetTimer(PlayGDLAlarmSound, 0)
+        return
+    }
+
+    media := A_WinDir . "\Media\Alarm01.wav"
+
+    if FileExist(media)
+    {
+        try SoundPlay(media)
+    }
+    else
+    {
+        try SoundBeep(1600, 180)
+        try SoundBeep(1200, 160)
+        try SoundBeep(1600, 180)
+        try SoundBeep(2000, 220)
+    }
+}
+
+StopGDLAlarm(*)
+{
+    global GDLAlarmGui, GDLAlarmEndTick
+
+    SetTimer(PlayGDLAlarmSound, 0)
+    GDLAlarmEndTick := 0
+
+    if IsObject(GDLAlarmGui)
+        GDLAlarmGui.Hide()
+
+    UpdateGDLTimerDisplay()
+}
+
+ShowGDLTimerConfirmation(message)
+{
+    ToolTip(message)
+    SetTimer(() => ToolTip(), -1400)
 }
