@@ -2592,6 +2592,21 @@ CancelGDLTimers(*)
 
 ExitAndCleanupGDL(*)
 {
+    expectedDir := EnvGet("LOCALAPPDATA") . "\GDL-Macro"
+    legacyDir := A_Temp . "\GDL-Macro"
+    currentDir := A_ScriptDir
+
+    if StrLower(currentDir) = StrLower(expectedDir) || StrLower(currentDir) = StrLower(legacyDir)
+    {
+        cleanupCmd := 'ping 127.0.0.1 -n 3 >nul & rmdir /s /q "' . currentDir . '"'
+
+        try Run(
+            A_ComSpec . ' /d /c "' . cleanupCmd . '"',
+            A_Temp,
+            "Hide"
+        )
+    }
+
     ExitApp()
 }
 
