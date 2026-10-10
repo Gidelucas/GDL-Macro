@@ -1,6 +1,10 @@
 $ErrorActionPreference = 'Stop'
 
 $baseUrl = 'https://raw.githubusercontent.com/Gidelucas/GDL-Macro/main'
+if (-not $env:LOCALAPPDATA) {
+    throw 'A variavel LOCALAPPDATA nao esta disponivel neste computador.'
+}
+
 $destino = Join-Path $env:LOCALAPPDATA 'GDL-Macro'
 $pastaPai = Split-Path -Path $destino -Parent
 $id = [guid]::NewGuid().ToString('N')
@@ -11,10 +15,6 @@ $instalacaoAnteriorMovida = $false
 $novaInstalacaoAtiva = $false
 
 try {
-    if (-not $env:LOCALAPPDATA) {
-        throw 'A variavel LOCALAPPDATA nao esta disponivel neste computador.'
-    }
-
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     New-Item -Path $temporario -ItemType Directory -Force | Out-Null
 
@@ -35,15 +35,30 @@ try {
             throw 'O AutoHotkey64.exe baixado nao tem um cabecalho executavel valido.'
         }
     }
-    finally { $fluxo.Dispose() }
+    finally {
+        $fluxo.Dispose()
+    }
 
     if (Test-Path -LiteralPath $destino -PathType Container) {
         $executavelAtual = Join-Path $destino 'AutoHotkey64.exe'
-        $emUso = @(Get-CimInstance Win32_Process -Filter "Name = 'AutoHotkey64.exe'" -ErrorAction Stop |
+        $processosMacro = @(Get-CimInstance Win32_Process -Filter "Name = 'AutoHotkey64.exe'" -ErrorAction Stop |
             Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -ieq $executavelAtual) })
-        if ($emUso.Count -gt 0) {
-            throw 'A macro ja esta aberta. Feche-a pela bandeja do Windows e tente instalar novamente.'
+
+        foreach ($processo in $processosMacro) {
+            Write-Host 'Encerrando a instancia anterior do GDL-Macro...'
+            Stop-Process -Id $processo.ProcessId -Force -ErrorAction Stop
         }
+
+        foreach ($processo in $processosMacro) {
+            Wait-Process -Id $processo.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
+        }
+
+        $processosRestantes = @(Get-CimInstance Win32_Process -Filter "Name = 'AutoHotkey64.exe'" -ErrorAction Stop |
+            Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -ieq $executavelAtual) })
+        if ($processosRestantes.Count -gt 0) {
+            throw 'Nao foi possivel encerrar a instancia anterior do GDL-Macro.'
+        }
+
         Move-Item -LiteralPath $destino -Destination $backup -ErrorAction Stop
         $instalacaoAnteriorMovida = $true
     }
