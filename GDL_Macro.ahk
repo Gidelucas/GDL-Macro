@@ -8,6 +8,8 @@ global GDLTimerText := 0
 global GDLAlarmGui := 0
 global GDLAlarmText := 0
 global GDLAlarmEndTick := 0
+global LastExplorerPath := ""
+global LastExplorerTick := 0
 
 global IniFile := A_ScriptDir "\snippets.ini"
 global Snippets := Map()
@@ -42,6 +44,8 @@ Hotstring(":?Z:;sair", ExitAndCleanupGDL)
 CreateGDLTimerDisplay()
 CreateGDLAlarmDisplay()
 SetTimer(UpdateGDLTimerDisplay, 250)
+SetTimer(CaptureExplorerSelection, 300)
+Hotstring(":?Z:;caminho", InsertSelectedPath)
 
 ^!t::ShowManager()
 
@@ -2592,11 +2596,10 @@ CancelGDLTimers(*)
 
 ExitAndCleanupGDL(*)
 {
-    expectedDir := EnvGet("LOCALAPPDATA") . "\GDL-Macro"
-    legacyDir := A_Temp . "\GDL-Macro"
+    expectedDir := A_Temp . "\GDL-Macro"
     currentDir := A_ScriptDir
 
-    if StrLower(currentDir) = StrLower(expectedDir) || StrLower(currentDir) = StrLower(legacyDir)
+    if StrLower(currentDir) = StrLower(expectedDir)
     {
         cleanupCmd := 'ping 127.0.0.1 -n 3 >nul & rmdir /s /q "' . currentDir . '"'
 
@@ -2768,3 +2771,119 @@ ShowGDLTimerConfirmation(message)
     ToolTip(message)
     SetTimer(() => ToolTip(), -1400)
 }
+
+CaptureExplorerSelection()
+{
+    global LastExplorerPath, LastExplorerTick
+
+    hwnd := WinExist("A")
+
+    if !hwnd
+        return
+
+    className := WinGetClass("ahk_id " . hwnd)
+
+    if className != "CabinetWClass" && className != "ExploreWClass"
+        return
+
+    path := GetSelectedExplorerPath(hwnd)
+
+    if path = ""
+        return
+
+    LastExplorerPath := path
+    LastExplorerTick := A_TickCount
+}
+
+GetSelectedExplorerPath(hwnd)
+{
+    try
+    {
+        shell := ComObject("Shell.Application")
+
+        for window in shell.Windows
+        {
+            try
+            {
+                if window.HWND != hwnd
+                    continue
+
+                selected := window.Document.SelectedItems
+
+                if selected.Count > 0
+                    return selected.Item(0).Path
+            }
+        }
+    }
+
+    return ""
+}
+
+InsertSelectedPath(*)
+{
+    global LastExplorerPath
+
+    currentPath := ""
+
+    hwnd := WinExist("A")
+
+    if hwnd
+    {
+        className := WinGetClass("ahk_id " . hwnd)
+
+        if className = "CabinetWClass" || className = "ExploreWClass"
+            currentPath := GetSelectedExplorerPath(hwnd)
+    }
+
+    if currentPath = ""
+        currentPath := LastExplorerPath
+
+    if currentPath = ""
+    {
+        ToolTip("Nenhum arquivo ou pasta selecionado no Explorer.")
+        SetTimer(() => ToolTip(), -1500)
+        return
+    }
+
+    networkPath := BuildComputerPath(currentPath)
+
+    savedClipboard := ClipboardAll()
+
+    try
+    {
+        A_Clipboard := networkPath
+
+        if ClipWait(1)
+        {
+            SendEvent("^v")
+            Sleep(120)
+        }
+    }
+    finally
+    {
+        A_Clipboard := savedClipboard
+    }
+
+    ToolTip("Caminho capturado")
+    SetTimer(() => ToolTip(), -1200)
+}
+
+BuildComputerPath(path)
+{
+    if SubStr(path, 1, 2) = "\\"
+        return path
+
+    if RegExMatch(path, "i)^([A-Z]):\\(.*)$", &match)
+    {
+        drive := StrUpper(match[1])
+        rest := match[2]
+
+        if rest = ""
+            return A_ComputerName . ":" . drive . ":"
+
+        return A_ComputerName . ":" . drive . ":\" . rest
+    }
+
+    return path
+}
+
