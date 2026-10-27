@@ -46,6 +46,8 @@ CreateGDLAlarmDisplay()
 SetTimer(UpdateGDLTimerDisplay, 250)
 SetTimer(CaptureExplorerSelection, 300)
 Hotstring(":?Z:;caminho", InsertSelectedPath)
+Hotstring(":?Z:;backup", OpenAdminPowerShellBackup)
+Hotstring(":?Z:;restore", OpenAdminPowerShellRestore)
 
 ^!t::ShowManager()
 
@@ -350,11 +352,14 @@ UpdateLiveSuggestionTooltip()
         }
 
         specialTextCommands := Map(
+            "backup", "Backup Firebird do FDB selecionado",
+            "caminho", "Inserir caminho do arquivo ou pasta selecionado",
             "cancela", "Cancelar temporizadores e alarmes",
-
             "mai", "Texto copiado em MAIÚSCULAS",
             "min", "Texto copiado em minúsculas",
-            "primai", "Iniciais Das Palavras Em Maiúsculas"
+            "primai", "Iniciais Das Palavras Em Maiúsculas",
+            "restore", "Restaurar FBK selecionado em nova base",
+            "sair", "Encerrar o GDL Macro"
         )
 
         for specialKey, specialDescription in specialTextCommands
@@ -797,9 +802,14 @@ ShowHelpTooltip()
         helpText .= "`n;" . key . "  →  " . description
     }
 
+    helpText .= "`n;backup  →  Backup Firebird do FDB selecionado"
+    helpText .= "`n;caminho  →  Inserir caminho do arquivo ou pasta selecionado"
+    helpText .= "`n;cancela  →  Cancelar temporizadores e alarmes"
     helpText .= "`n;mai  →  Texto copiado em MAIÚSCULAS"
     helpText .= "`n;min  →  Texto copiado em minúsculas"
     helpText .= "`n;primai  →  Inicial de cada palavra em maiúscula"
+    helpText .= "`n;restore  →  Restaurar FBK selecionado em nova base"
+    helpText .= "`n;sair  →  Encerrar o GDL Macro"
 
     helpText .= "`n;help  →  Mostrar todos os comandos"
 
@@ -834,7 +844,7 @@ ShowHelpTooltip()
     }
 
 
-    totalCommands := Snippets.Count + Actions.Count + 5
+    totalCommands := Snippets.Count + Actions.Count + 9
 
     helpText .= "`n`n--------------------------------"
     helpText .= "`nTOTAL: " . totalCommands . " comandos"
@@ -2885,5 +2895,234 @@ BuildComputerPath(path)
     }
 
     return path
+}
+
+GetCurrentOrLastExplorerPath()
+{
+    global LastExplorerPath
+
+    currentPath := ""
+    hwnd := WinExist("A")
+
+    if hwnd
+    {
+        className := WinGetClass("ahk_id " . hwnd)
+
+        if className = "CabinetWClass" || className = "ExploreWClass"
+            currentPath := GetSelectedExplorerPath(hwnd)
+    }
+
+    if currentPath = ""
+        currentPath := LastExplorerPath
+
+    return currentPath
+}
+
+FindGbak()
+{
+    candidates := [
+        "C:\Program Files\Firebird\Firebird_3_0\gbak.exe",
+        "C:\Program Files\Firebird\Firebird_4_0\gbak.exe",
+        "C:\Program Files\Firebird\Firebird_5_0\gbak.exe"
+    ]
+
+    for candidate in candidates
+    {
+        if FileExist(candidate)
+            return candidate
+    }
+
+    return ""
+}
+
+OpenAdminPowerShellBackup(*)
+{
+    selectedPath := GetCurrentOrLastExplorerPath()
+
+    if selectedPath = ""
+    {
+        ShowGDLMessage("Selecione um arquivo FDB no Explorer.")
+        return
+    }
+
+    if !RegExMatch(selectedPath, "i)\.fdb$")
+    {
+        ShowGDLMessage("Selecione um arquivo FDB para fazer o backup.")
+        return
+    }
+
+    gbak := FindGbak()
+
+    if gbak = ""
+    {
+        MsgBox(
+            "Nao foi encontrado gbak.exe do Firebird 3, 4 ou 5.",
+            "GDL Macro - Backup",
+            "Icon!"
+        )
+        return
+    }
+
+    sourceDatabase := BuildFirebirdDatabasePath(selectedPath)
+    backupPath := RegExReplace(selectedPath, "i)\.fdb$", ".FBK")
+
+    if FileExist(backupPath)
+    {
+        answer := MsgBox(
+            "Ja existe um backup com este nome:`n`n"
+            . backupPath
+            . "`n`nDeseja substituir?",
+            "GDL Macro - Backup",
+            "YesNo Icon?"
+        )
+
+        if answer != "Yes"
+            return
+    }
+
+    psCommand :=
+        "& " . GDLPSQuote(gbak)
+        . " -BACKUP"
+        . " -VERBOSE"
+        . " -USER SYSDBA"
+        . " -FETCH_PASSWORD stdin"
+        . " " . GDLPSQuote(sourceDatabase)
+        . " " . GDLPSQuote(backupPath)
+
+    OpenElevatedPowerShell(psCommand, GetGDLParentFolder(selectedPath))
+}
+
+OpenAdminPowerShellRestore(*)
+{
+    selectedPath := GetCurrentOrLastExplorerPath()
+
+    if selectedPath = ""
+    {
+        ShowGDLMessage("Selecione um arquivo FBK no Explorer.")
+        return
+    }
+
+    if !RegExMatch(selectedPath, "i)\.fbk$")
+    {
+        ShowGDLMessage("Selecione um arquivo FBK para fazer o restore.")
+        return
+    }
+
+    gbak := FindGbak()
+
+    if gbak = ""
+    {
+        MsgBox(
+            "Nao foi encontrado gbak.exe do Firebird 3, 4 ou 5.",
+            "GDL Macro - Restore",
+            "Icon!"
+        )
+        return
+    }
+
+    restoreLocalPath := RegExReplace(
+        selectedPath,
+        "i)\.fbk$",
+        "_RESTAURADO.FDB"
+    )
+
+    if FileExist(restoreLocalPath)
+    {
+        MsgBox(
+            "O arquivo de destino ja existe:`n`n"
+            . restoreLocalPath
+            . "`n`nO restore foi cancelado para evitar sobrescrever a base.",
+            "GDL Macro - Restore",
+            "Icon!"
+        )
+        return
+    }
+
+    restoreDatabase := BuildFirebirdDatabasePath(restoreLocalPath)
+
+    psCommand :=
+        "& " . GDLPSQuote(gbak)
+        . " -CREATE"
+        . " -VERBOSE"
+        . " -USER SYSDBA"
+        . " -FETCH_PASSWORD stdin"
+        . " " . GDLPSQuote(selectedPath)
+        . " " . GDLPSQuote(restoreDatabase)
+
+    OpenElevatedPowerShell(psCommand, GetGDLParentFolder(selectedPath))
+}
+
+OpenElevatedPowerShell(command, workingDir := "")
+{
+    psExe := A_WinDir . "\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+    if !FileExist(psExe)
+    {
+        MsgBox(
+            "PowerShell nao foi encontrado neste computador.",
+            "GDL Macro",
+            "Icon!"
+        )
+        return
+    }
+
+    args :=
+        "-NoProfile -NoExit -Command "
+        . Chr(34)
+        . command
+        . Chr(34)
+
+    try
+    {
+        Run(
+            "*RunAs " . GDLQuoteArg(psExe) . " " . args,
+            workingDir
+        )
+    }
+    catch as error
+    {
+        MsgBox(
+            "Nao foi possivel abrir o PowerShell como administrador.`n`n"
+            . error.Message,
+            "GDL Macro",
+            "Icon!"
+        )
+    }
+}
+
+BuildFirebirdDatabasePath(path)
+{
+    if SubStr(path, 1, 2) = "\\"
+        return path
+
+    if RegExMatch(path, "i)^[A-Z]:\\")
+        return "localhost:" . path
+
+    if RegExMatch(path, "i)^[^\\/:]+:[A-Z]:\\")
+        return path
+
+    return path
+}
+
+GetGDLParentFolder(path)
+{
+    SplitPath(path, , &dir)
+    return dir
+}
+
+GDLQuoteArg(value)
+{
+    return Chr(34) . value . Chr(34)
+}
+
+GDLPSQuote(value)
+{
+    return "'" . StrReplace(value, "'", "''") . "'"
+}
+
+ShowGDLMessage(message)
+{
+    ToolTip(message)
+    SetTimer(() => ToolTip(), -1500)
 }
 
