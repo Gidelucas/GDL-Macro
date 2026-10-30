@@ -53,6 +53,7 @@ Hotstring(":?Z:;backup", OpenAdminPowerShellBackup)
 Hotstring(":?Z:;restore", OpenAdminPowerShellRestore)
 Hotstring(":?Z:;xml", OpenSelectedXmlViewer)
 Hotstring(":?Z:;kdxml", FindNfceXmlByClipboardKey)
+Hotstring(":?Z:;sflxml", OpenSflXmlFromClipboardKey)
 Hotstring(":?Z:;copiatxt", CopySelectedTextFile)
 
 ^!t::ShowManager()
@@ -368,6 +369,7 @@ UpdateLiveSuggestionTooltip()
             "min", "Texto copiado em minúsculas",
             "primai", "Iniciais Das Palavras Em Maiúsculas",
             "restore", "Restaurar FBK selecionado em nova base",
+            "sflxml", "Localizar NFC-e pela chave e abrir no visualizador",
             "xml", "Analisar XML NF-e selecionado",
             "sair", "Encerrar o GDL Macro"
         )
@@ -821,6 +823,7 @@ ShowHelpTooltip()
     helpText .= "`n;min  →  Texto copiado em minúsculas"
     helpText .= "`n;primai  →  Inicial de cada palavra em maiúscula"
     helpText .= "`n;restore  →  Restaurar FBK selecionado em nova base"
+    helpText .= "`n;sflxml  →  Localizar NFC-e pela chave e abrir no visualizador"
     helpText .= "`n;xml  →  Analisar XML NF-e selecionado"
     helpText .= "`n;sair  →  Encerrar o GDL Macro"
 
@@ -857,7 +860,7 @@ ShowHelpTooltip()
     }
 
 
-    totalCommands := Snippets.Count + Actions.Count + 11
+    totalCommands := Snippets.Count + Actions.Count + 12
 
     helpText .= "`n`n--------------------------------"
     helpText .= "`nTOTAL: " . totalCommands . " comandos"
@@ -3601,112 +3604,10 @@ ReadTextFileSmart(path)
 
 FindNfceXmlByClipboardKey(*)
 {
-    key := RegExReplace(A_Clipboard, "\D", "")
-
-    ShowKdxmlTip("Lendo chave NFC-e do clipboard...")
-
-    if StrLen(key) != 44
-    {
-        MsgBox(
-            "A area de transferencia nao contem uma chave NFC-e valida de 44 digitos.",
-            "GDL Macro - KDXML",
-            "Icon!"
-        )
-        return
-    }
-
-    ShowKdxmlTip("Chave valida. Procurando SFL.exe aberto...")
-
-    pid := ProcessExist("SFL.exe")
-
-    if !pid
-    {
-        MsgBox(
-            "O processo SFL.exe nao esta aberto.",
-            "GDL Macro - KDXML",
-            "Icon!"
-        )
-        return
-    }
-
-    try
-    {
-        exePath := ProcessGetPath(pid)
-    }
-    catch as error
-    {
-        MsgBox(
-            "Nao foi possivel identificar o caminho do SFL.exe.`n`n"
-            . error.Message,
-            "GDL Macro - KDXML",
-            "Icon!"
-        )
-        return
-    }
-
-    if exePath = ""
-    {
-        MsgBox(
-            "Nao foi possivel identificar o caminho do SFL.exe.",
-            "GDL Macro - KDXML",
-            "Icon!"
-        )
-        return
-    }
-
-    SplitPath(exePath, , &sflDir)
-
-    ShowKdxmlTip("SFL.exe encontrado em:`n" . sflDir)
-
-    nfceDir := sflDir . "\NFCE"
-
-    if !DirExist(nfceDir)
-    {
-        MsgBox(
-            "A pasta NFCE nao foi encontrada.`n`n"
-            . "SFL.exe: " . exePath . "`n"
-            . "Esperado: " . nfceDir,
-            "GDL Macro - KDXML",
-            "Icon!"
-        )
-        return
-    }
-
-    ShowKdxmlTip("Pasta NFCE encontrada. Procurando a chave...")
-
-    foundFile := ""
-
-    ; Primeiro procura XMLs contendo a chave no nome.
-    Loop Files nfceDir . "\*" . key . "*.xml", "FR"
-    {
-        foundFile := A_LoopFileFullPath
-        break
-    }
-
-    ; Depois tenta qualquer arquivo contendo a chave.
-    if foundFile = ""
-    {
-        Loop Files nfceDir . "\*" . key . "*", "FR"
-        {
-            if !InStr(FileExist(A_LoopFileFullPath), "D")
-            {
-                foundFile := A_LoopFileFullPath
-                break
-            }
-        }
-    }
+    foundFile := FindNfceXmlPathFromClipboardKey("KDXML")
 
     if foundFile = ""
-    {
-        MsgBox(
-            "Nenhum arquivo contendo esta chave foi encontrado na pasta NFCE.`n`n"
-            . key . "`n`n"
-            . nfceDir,
-            "GDL Macro - KDXML",
-            "Icon!"
-        )
         return
-    }
 
     ShowKdxmlTip("Arquivo encontrado:`n" . foundFile)
 
@@ -3728,6 +3629,149 @@ FindNfceXmlByClipboardKey(*)
             "Icon!"
         )
     }
+}
+
+OpenSflXmlFromClipboardKey(*)
+{
+    global AppGui
+
+    foundFile := FindNfceXmlPathFromClipboardKey("SFLXML")
+
+    if foundFile = ""
+        return
+
+    ShowKdxmlTip("XML encontrado. Abrindo visualizador...")
+
+    copied := CopySelectedXmlToClipboard(foundFile)
+
+    if !IsObject(AppGui)
+        CreateMainGui()
+
+    LoadXml(foundFile)
+
+    try
+    {
+        AppGui.Show("w1000 h630")
+        AppGui.Opt("+AlwaysOnTop")
+        AppGui.Opt("-AlwaysOnTop")
+    }
+
+    if copied
+        ShowKdxmlTip("XML carregado e copiado para o clipboard.")
+    else
+        ShowKdxmlTip("XML carregado. Nao foi possivel copiar para o clipboard.")
+}
+
+FindNfceXmlPathFromClipboardKey(commandName := "SFLXML")
+{
+    key := RegExReplace(A_Clipboard, "\D", "")
+
+    ShowKdxmlTip("Lendo chave NFC-e do clipboard...")
+
+    if StrLen(key) != 44
+    {
+        MsgBox(
+            "A area de transferencia nao contem uma chave NFC-e valida de 44 digitos.",
+            "GDL Macro - " . commandName,
+            "Icon!"
+        )
+        return ""
+    }
+
+    ShowKdxmlTip("Chave valida. Procurando SFL.exe aberto...")
+
+    pid := ProcessExist("SFL.exe")
+
+    if !pid
+    {
+        MsgBox(
+            "O processo SFL.exe nao esta aberto.",
+            "GDL Macro - " . commandName,
+            "Icon!"
+        )
+        return ""
+    }
+
+    try
+    {
+        exePath := ProcessGetPath(pid)
+    }
+    catch as error
+    {
+        MsgBox(
+            "Nao foi possivel identificar o caminho do SFL.exe.`n`n"
+            . error.Message,
+            "GDL Macro - " . commandName,
+            "Icon!"
+        )
+        return ""
+    }
+
+    if exePath = ""
+    {
+        MsgBox(
+            "Nao foi possivel identificar o caminho do SFL.exe.",
+            "GDL Macro - " . commandName,
+            "Icon!"
+        )
+        return ""
+    }
+
+    SplitPath(exePath, , &sflDir)
+
+    ShowKdxmlTip("SFL.exe encontrado em:`n" . sflDir)
+
+    nfceDir := sflDir . "\NFCE"
+
+    if !DirExist(nfceDir)
+    {
+        MsgBox(
+            "A pasta NFCE nao foi encontrada.`n`n"
+            . "SFL.exe: " . exePath . "`n"
+            . "Esperado: " . nfceDir,
+            "GDL Macro - " . commandName,
+            "Icon!"
+        )
+        return ""
+    }
+
+    ShowKdxmlTip("Pasta NFCE encontrada. Procurando a chave...")
+
+    foundFile := ""
+
+    ; Primeiro procura XMLs contendo a chave no nome.
+    Loop Files nfceDir . "\*" . key . "*.xml", "FR"
+    {
+        foundFile := A_LoopFileFullPath
+        break
+    }
+
+    ; Se nao encontrar XML, procura qualquer arquivo com a chave no nome.
+    if foundFile = ""
+    {
+        Loop Files nfceDir . "\*" . key . "*", "FR"
+        {
+            if !InStr(FileExist(A_LoopFileFullPath), "D")
+            {
+                foundFile := A_LoopFileFullPath
+                break
+            }
+        }
+    }
+
+    if foundFile = ""
+    {
+        MsgBox(
+            "Nenhum arquivo contendo esta chave foi encontrado na pasta NFCE.`n`n"
+            . key . "`n`n"
+            . nfceDir,
+            "GDL Macro - " . commandName,
+            "Icon!"
+        )
+        return ""
+    }
+
+    return foundFile
 }
 
 ShowKdxmlTip(message)
