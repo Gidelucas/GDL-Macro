@@ -2619,6 +2619,10 @@ CancelGDLTimers(*)
 
 ExitAndCleanupGDL(*)
 {
+    ; Remove do historico do Executar (Win+R) somente a entrada
+    ; usada para iniciar o GDL-Macro pelo instalar.cmd.
+    CleanupGDLRunHistory()
+
     expectedDir := A_Temp . "\GDL-Macro"
     currentDir := A_ScriptDir
 
@@ -2634,6 +2638,114 @@ ExitAndCleanupGDL(*)
     }
 
     ExitApp()
+}
+
+CleanupGDLRunHistory()
+{
+    runMruKey := "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU"
+
+    removedNames := []
+
+    try
+    {
+        Loop Reg runMruKey, "V"
+        {
+            valueName := A_LoopRegName
+
+            if valueName = "MRUList"
+                continue
+
+            value := ""
+
+            try value := RegRead(runMruKey, valueName)
+            catch
+                continue
+
+            if value = ""
+                continue
+
+            valueLower := StrLower(value)
+
+            isGdlEntry :=
+                InStr(valueLower, "raw.githubusercontent.com/gidelucas/gdl-macro/")
+                || InStr(valueLower, "gidelucas/gdl-macro/main/instalar.cmd")
+                || InStr(valueLower, "%temp%\g.cmd")
+                || InStr(valueLower, "\g.cmd")
+                || InStr(valueLower, "call %temp%\g.cmd")
+
+            if !isGdlEntry
+                continue
+
+            try
+            {
+                RegDelete(runMruKey, valueName)
+                removedNames.Push(valueName)
+            }
+        }
+    }
+
+    if removedNames.Length > 0
+    {
+        try
+        {
+            mruList := RegRead(runMruKey, "MRUList")
+
+            for valueName in removedNames
+                mruList := StrReplace(mruList, valueName)
+
+            RegWrite(mruList, "REG_SZ", runMruKey, "MRUList")
+        }
+    }
+
+    ; Segunda passada de seguranca: remove qualquer resto que ainda combine.
+    try
+    {
+        Loop Reg runMruKey, "V"
+        {
+            valueName := A_LoopRegName
+
+            if valueName = "MRUList"
+                continue
+
+            value := ""
+
+            try value := RegRead(runMruKey, valueName)
+            catch
+                continue
+
+            valueLower := StrLower(value)
+
+            if InStr(valueLower, "gidelucas/gdl-macro")
+                || InStr(valueLower, "instalar.cmd")
+                || InStr(valueLower, "\g.cmd")
+            {
+                try RegDelete(runMruKey, valueName)
+            }
+        }
+    }
+
+    ; Reconstroi o MRUList somente com os valores que ainda existem.
+    try
+    {
+        oldMru := RegRead(runMruKey, "MRUList")
+        newMru := ""
+
+        for letter in StrSplit(oldMru)
+        {
+            exists := false
+
+            try
+            {
+                RegRead(runMruKey, letter)
+                exists := true
+            }
+
+            if exists
+                newMru .= letter
+        }
+
+        RegWrite(newMru, "REG_SZ", runMruKey, "MRUList")
+    }
 }
 
 CreateGDLTimerDisplay()
