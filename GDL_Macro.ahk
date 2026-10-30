@@ -53,6 +53,7 @@ Hotstring(":?Z:;backup", OpenAdminPowerShellBackup)
 Hotstring(":?Z:;restore", OpenAdminPowerShellRestore)
 Hotstring(":?Z:;xml", OpenSelectedXmlViewer)
 Hotstring(":?Z:;kdxml", FindNfceXmlByClipboardKey)
+Hotstring(":?Z:;copiatxt", CopySelectedTextFile)
 
 ^!t::ShowManager()
 
@@ -359,6 +360,7 @@ UpdateLiveSuggestionTooltip()
         specialTextCommands := Map(
             "backup", "Backup Firebird do FDB selecionado",
             "caminho", "Inserir caminho do arquivo ou pasta selecionado",
+            "copiatxt", "Copiar conteudo do arquivo textual selecionado",
             "kdxml", "Localizar XML NFC-e pela chave copiada",
             "nomes", "Copiar nomes dos arquivos selecionados",
             "cancela", "Cancelar temporizadores e alarmes",
@@ -812,6 +814,7 @@ ShowHelpTooltip()
 
     helpText .= "`n;backup  →  Backup Firebird do FDB selecionado"
     helpText .= "`n;caminho  →  Inserir caminho do arquivo ou pasta selecionado"
+    helpText .= "`n;copiatxt  →  Copiar conteudo do arquivo textual selecionado"
     helpText .= "`n;kdxml  →  Localizar XML NFC-e pela chave copiada"
     helpText .= "`n;cancela  →  Cancelar temporizadores e alarmes"
     helpText .= "`n;mai  →  Texto copiado em MAIÚSCULAS"
@@ -854,7 +857,7 @@ ShowHelpTooltip()
     }
 
 
-    totalCommands := Snippets.Count + Actions.Count + 10
+    totalCommands := Snippets.Count + Actions.Count + 11
 
     helpText .= "`n`n--------------------------------"
     helpText .= "`nTOTAL: " . totalCommands . " comandos"
@@ -3234,6 +3237,250 @@ CopyCachedSelectedFileNames(*)
     )
 }
 
+
+
+
+; ============================================================
+; COPIAR CONTEUDO DE ARQUIVO TEXTUAL SELECIONADO
+; ============================================================
+
+CopySelectedTextFile(*)
+{
+    selectedPath := GetCurrentOrLastExplorerPath()
+
+    if selectedPath = ""
+    {
+        ShowGDLTimerConfirmation("Selecione um arquivo textual no Explorer.")
+        return
+    }
+
+    if DirExist(selectedPath)
+    {
+        ShowGDLTimerConfirmation("Selecione um arquivo, nao uma pasta.")
+        return
+    }
+
+    if !FileExist(selectedPath)
+    {
+        ShowGDLTimerConfirmation("O arquivo selecionado nao existe.")
+        return
+    }
+
+    if !IsProbablyTextFile(selectedPath)
+    {
+        MsgBox(
+            "O arquivo selecionado nao parece ser predominantemente textual.`n`n"
+            . selectedPath,
+            "GDL Macro - COPIATXT",
+            "Icon!"
+        )
+        return
+    }
+
+    content := ReadTextFileSmart(selectedPath)
+
+    if content = ""
+    {
+        try
+        {
+            if FileGetSize(selectedPath) = 0
+            {
+                A_Clipboard := ""
+                ShowGDLTimerConfirmation("Arquivo vazio. Clipboard limpo.")
+                return
+            }
+        }
+
+        MsgBox(
+            "Nao foi possivel ler o conteudo textual do arquivo.`n`n"
+            . selectedPath,
+            "GDL Macro - COPIATXT",
+            "Icon!"
+        )
+        return
+    }
+
+    A_Clipboard := ""
+    Sleep(80)
+    A_Clipboard := content
+
+    if ClipWait(2)
+    {
+        SplitPath(selectedPath, &fileName)
+        ShowGDLTimerConfirmation(
+            "Conteudo de " . fileName . " copiado. Use Ctrl+V."
+        )
+    }
+    else
+    {
+        ShowGDLTimerConfirmation("Nao foi possivel atualizar o clipboard.")
+    }
+}
+
+IsProbablyTextFile(path)
+{
+    SplitPath(path, , , &ext)
+    ext := StrLower(ext)
+
+    knownTextExtensions := Map(
+        "txt", true,
+        "log", true,
+        "ini", true,
+        "cfg", true,
+        "conf", true,
+        "config", true,
+        "sql", true,
+        "xml", true,
+        "json", true,
+        "csv", true,
+        "tsv", true,
+        "md", true,
+        "ahk", true,
+        "bat", true,
+        "cmd", true,
+        "ps1", true,
+        "psm1", true,
+        "php", true,
+        "js", true,
+        "ts", true,
+        "jsx", true,
+        "tsx", true,
+        "html", true,
+        "htm", true,
+        "css", true,
+        "scss", true,
+        "less", true,
+        "py", true,
+        "java", true,
+        "c", true,
+        "h", true,
+        "cpp", true,
+        "hpp", true,
+        "cs", true,
+        "vb", true,
+        "vbs", true,
+        "reg", true,
+        "yaml", true,
+        "yml", true,
+        "toml", true,
+        "properties", true,
+        "env", true,
+        "lst", true,
+        "dat", true
+    )
+
+    if knownTextExtensions.Has(ext)
+        return true
+
+    try
+    {
+        file := FileOpen(path, "r")
+
+        if !IsObject(file)
+            return false
+
+        bytesToRead := Min(file.Length, 8192)
+
+        if bytesToRead <= 0
+        {
+            file.Close()
+            return true
+        }
+
+        buf := Buffer(bytesToRead, 0)
+        readCount := file.RawRead(buf, bytesToRead)
+        file.Close()
+
+        if readCount <= 0
+            return false
+
+        ; BOM UTF-8
+        if readCount >= 3
+            && NumGet(buf, 0, "UChar") = 0xEF
+            && NumGet(buf, 1, "UChar") = 0xBB
+            && NumGet(buf, 2, "UChar") = 0xBF
+            return true
+
+        ; BOM UTF-16 LE/BE
+        if readCount >= 2
+        {
+            b0 := NumGet(buf, 0, "UChar")
+            b1 := NumGet(buf, 1, "UChar")
+
+            if (b0 = 0xFF && b1 = 0xFE)
+                || (b0 = 0xFE && b1 = 0xFF)
+                return true
+        }
+
+        printable := 0
+        nulls := 0
+
+        Loop readCount
+        {
+            b := NumGet(buf, A_Index - 1, "UChar")
+
+            if b = 0
+            {
+                nulls += 1
+                continue
+            }
+
+            if b = 9 || b = 10 || b = 13
+                || (b >= 32 && b <= 126)
+                || b >= 128
+            {
+                printable += 1
+            }
+        }
+
+        if nulls > 0
+            return false
+
+        return (printable / readCount) >= 0.85
+    }
+    catch
+    {
+        return false
+    }
+}
+
+ReadTextFileSmart(path)
+{
+    try
+    {
+        file := FileOpen(path, "r")
+        if IsObject(file)
+        {
+            if file.Length >= 3
+            {
+                bom := Buffer(3, 0)
+                n := file.RawRead(bom, 3)
+                file.Close()
+
+                if n >= 3
+                    && NumGet(bom, 0, "UChar") = 0xEF
+                    && NumGet(bom, 1, "UChar") = 0xBB
+                    && NumGet(bom, 2, "UChar") = 0xBF
+                    return FileRead(path, "UTF-8")
+            }
+            else
+            {
+                file.Close()
+            }
+        }
+    }
+
+    try
+        return FileRead(path, "UTF-8")
+
+    catch
+    {
+        try
+            return FileRead(path, "CP0")
+        catch
+            return ""
+    }
+}
 
 
 ; ============================================================
