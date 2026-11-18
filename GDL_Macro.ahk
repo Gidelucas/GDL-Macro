@@ -4264,23 +4264,31 @@ UpdateXmlEnvironmentBanner()
     global EnvBanner
 
     tpAmb := X("//nfe:NFe/nfe:infNFe/nfe:ide/nfe:tpAmb")
+    tpEmis := X("//nfe:NFe/nfe:infNFe/nfe:ide/nfe:tpEmis")
 
     if tpAmb = ""
         tpAmb := XLocal("//*[local-name()='NFe']/*[local-name()='infNFe']/*[local-name()='ide']/*[local-name()='tpAmb']")
 
+    if tpEmis = ""
+        tpEmis := XLocal("//*[local-name()='NFe']/*[local-name()='infNFe']/*[local-name()='ide']/*[local-name()='tpEmis']")
+
     if !IsObject(EnvBanner)
         return
+
+    suffix := ""
+    if tpEmis = "9"
+        suffix := "  |  CONTINGENCIA OFFLINE"
 
     switch tpAmb
     {
         case "1":
-            EnvBanner.Text := "AMBIENTE DE PRODUCAO"
+            EnvBanner.Text := "AMBIENTE DE PRODUCAO" . suffix
             EnvBanner.Opt("Background198754 cFFFFFF")
         case "2":
-            EnvBanner.Text := "AMBIENTE DE HOMOLOGACAO"
+            EnvBanner.Text := "AMBIENTE DE HOMOLOGACAO" . suffix
             EnvBanner.Opt("Background0D6EFD cFFFFFF")
         default:
-            EnvBanner.Text := "AMBIENTE NAO IDENTIFICADO"
+            EnvBanner.Text := "AMBIENTE NAO IDENTIFICADO" . suffix
             EnvBanner.Opt("Background808080 cFFFFFF")
     }
 
@@ -4327,10 +4335,29 @@ PopulateGeneral()
 
     cStat := X("//nfe:protNFe/nfe:infProt/nfe:cStat")
     xMotivo := X("//nfe:protNFe/nfe:infProt/nfe:xMotivo")
+    tpEmis := X(ide . "/nfe:tpEmis")
+    dhCont := X(ide . "/nfe:dhCont")
+    xJust := X(ide . "/nfe:xJust")
 
     situacao := ""
-    if cStat != "" || xMotivo != ""
+
+    if tpEmis = "9"
+    {
+        if cStat != "" || xMotivo != ""
+            situacao := "CONTINGENCIA OFFLINE | " . Trim(cStat . " - " . xMotivo, " -")
+        else
+            situacao := "CONTINGENCIA OFFLINE - AGUARDANDO TRANSMISSAO"
+
+        if dhCont != ""
+            situacao .= " | Inicio: " . dhCont
+
+        if xJust != ""
+            situacao .= " | Motivo: " . xJust
+    }
+    else if cStat != "" || xMotivo != ""
+    {
         situacao := Trim(cStat . " - " . xMotivo, " -")
+    }
 
     SetField(GeneralFields, "situacao", DisplayMissing(situacao))
     SetField(GeneralFields, "nProt", X("//nfe:protNFe/nfe:infProt/nfe:nProt"))
@@ -4816,16 +4843,31 @@ CopyXmlAuthorizationStatus(*)
     nProt := X("//nfe:protNFe/nfe:infProt/nfe:nProt")
     dhRecbto := X("//nfe:protNFe/nfe:infProt/nfe:dhRecbto")
 
+    tpEmis := X("//nfe:NFe/nfe:infNFe/nfe:ide/nfe:tpEmis")
+    dhCont := X("//nfe:NFe/nfe:infNFe/nfe:ide/nfe:dhCont")
+    xJust := X("//nfe:NFe/nfe:infNFe/nfe:ide/nfe:xJust")
+
     ; 100 = Autorizado o uso da NF-e
     ; 150 = Autorizado o uso da NF-e, autorizacao fora de prazo
     if cStat = "100" || cStat = "150"
-        status := "AUTORIZADO"
+        status := tpEmis = "9" ? "AUTORIZADO - EMITIDO EM CONTINGENCIA OFFLINE" : "AUTORIZADO"
+    else if cStat = "" && tpEmis = "9"
+        status := "CONTINGENCIA OFFLINE / AGUARDANDO TRANSMISSAO"
     else if cStat = ""
         status := "STATUS NAO INFORMADO / SEM PROTOCOLO"
     else
         status := "NAO AUTORIZADO"
 
     text := "Status XML: " . status
+
+    if tpEmis = "9"
+    {
+        if dhCont != ""
+            text .= "`r`nInicio contingencia: " . dhCont
+
+        if xJust != ""
+            text .= "`r`nJustificativa: " . xJust
+    }
 
     if cStat != ""
         text .= "`r`ncStat: " . cStat
